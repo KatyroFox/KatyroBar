@@ -150,15 +150,26 @@
                 let lines = text.trim().split("\n");
                 if (lines.length > 0) {
                     let last = JSON.parse(lines[lines.length - 1]);
-                    if (last && last.message) {
-                        let payload = JSON.parse(last.message);
-                        if (payload.cocktails && payload.cocktails.length > 0) {
-                            renderMenu(payload.cocktails);
-                            return;
+                    if (last) {
+                        if (last.attachment && last.attachment.url) {
+                            let attRes = await fetch(last.attachment.url);
+                            let payload = await attRes.json();
+                            if (payload.cocktails && payload.cocktails.length > 0) {
+                                renderMenu(payload.cocktails);
+                                return;
+                            }
+                        } else if (last.message) {
+                            let payload = JSON.parse(last.message);
+                            if (payload.cocktails && payload.cocktails.length > 0) {
+                                renderMenu(payload.cocktails);
+                                return;
+                            }
                         }
                     }
                 }
-            } catch(e) {}
+            } catch(e) {
+                console.error("loadMenu Fehler:", e);
+            }
         }
 
         function renderMenu(cocktails) {
