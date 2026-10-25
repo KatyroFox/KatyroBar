@@ -152,18 +152,13 @@
                     let last = JSON.parse(lines[lines.length - 1]);
                     if (last && last.message) {
                         let payload = JSON.parse(last.message);
-                        if (payload.cocktails) {
+                        if (payload.cocktails && payload.cocktails.length > 0) {
                             renderMenu(payload.cocktails);
                             return;
                         }
                     }
                 }
             } catch(e) {}
-
-            renderMenu([
-                { name: "Screwdriver", recipe: [{pumpId:1, amountMl:50}, {pumpId:2, amountMl:150}], ingredients: ["Wodka", "Orangensaft"], thumb: "https://www.thecocktaildb.com/images/media/drink/8xnyke1504352207.jpg" },
-                { name: "Cuba Libre", recipe: [{pumpId:3, amountMl:50}, {pumpId:4, amountMl:150}], ingredients: ["Rum", "Limonade"], thumb: "https://www.thecocktaildb.com/images/media/drink/wmkbfj1606853905.jpg" }
-            ]);
         }
 
         function renderMenu(cocktails) {
