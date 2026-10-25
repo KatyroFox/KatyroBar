@@ -54,6 +54,28 @@
                 const service = await server.getPrimaryService(SERVICE_UUID);
                 rxCharacteristic = await service.getCharacteristic(RX_UUID);
 
+                // Live Sync vom ESP32 empfangen
+                try {
+                    const txChar = await service.getCharacteristic("6e400003-b5a3-f393-e0a9-e50e24dcca9e");
+                    await txChar.startNotifications();
+                    txChar.addEventListener('characteristicvaluechanged', (event) => {
+                        let decoder = new TextDecoder();
+                        let val = decoder.decode(event.target.value).trim();
+                        if (val.startsWith("*barSync:")) {
+                            try {
+                                let jsonStr = val.substring(9);
+                                let syncData = JSON.parse(jsonStr);
+                                if (syncData.cocktails) {
+                                    renderMenu(syncData.cocktails);
+                                }
+                            } catch(e) {}
+                        }
+                    });
+
+                    let encoder = new TextEncoder();
+                    await rxCharacteristic.writeValue(encoder.encode("getBarSync"));
+                } catch(e1) {}
+
                 document.getElementById("btStatus").innerText = "🟢 Erfolgreich mit Maschine verbunden!";
                 return true;
             } catch (e) {
@@ -79,23 +101,46 @@
                 return;
             }
 
-            let connected = await connectWebBluetooth();
-            if (!connected) return;
+            // Wenn Web-Bluetooth unterstützt wird (Android Chrome, Samsung Browser, Bluefy auf iOS)
+            if (navigator.bluetooth) {
+                let connected = await connectWebBluetooth();
+                if (!connected) return;
 
-            document.getElementById("btStatus").innerText = `🍹 Zapfe ${cocktailName}...`;
+                document.getElementById("btStatus").innerText = `🍹 Zapfe ${cocktailName}...`;
 
-            for (let item of recipe) {
-                let pumpIdx = (item.pumpId || 1) - 1;
-                let durMs = (item.amountMl || 40) * 1000;
+                for (let item of recipe) {
+                    let pumpIdx = (item.pumpId || 1) - 1;
+                    let durMs = (item.amountMl || 40) * 1000;
 
-                await sendBleCommand(`^${pumpIdx}-f`);
-                await new Promise(r => setTimeout(r, durMs));
-                await sendBleCommand(`^${pumpIdx}-s`);
-                await new Promise(r => setTimeout(r, 200));
+                    await sendBleCommand(`^${pumpIdx}-f`);
+                    await new Promise(r => setTimeout(r, durMs));
+                    await sendBleCommand(`^${pumpIdx}-s`);
+                    await new Promise(r => setTimeout(r, 200));
+                }
+
+                document.getElementById("btStatus").innerText = "🎉 Fertig! Prost!";
+                alert(`🎉 Dein "${cocktailName}" wurde fertig gezapft! Prost!`);
+            } else {
+                // Fallback für iPhone Safari (sendet Bestellung per Online-Kanal an die Maschine)
+                document.getElementById("btStatus").innerText = `📤 Sende Bestellung für ${cocktailName}...`;
+
+                try {
+                    let payload = {
+                        guestName: "iPhone Gast",
+                        cocktailName: cocktailName,
+                        recipe: recipe,
+                        timestamp: Date.now()
+                    };
+                    await fetch(`https://ntfy.sh/mybar_orders_${partyBarId}`, {
+                        method: "POST",
+                        body: JSON.stringify(payload)
+                    });
+                    document.getElementById("btStatus").innerText = "✅ Bestellung gesendet!";
+                    alert(`🍹 Deine Bestellung für "${cocktailName}" wurde an die Maschine gesendet! Dein Cocktail wird gleich gezapft.`);
+                } catch(e) {
+                    alert("Fehler beim Senden der Bestellung. Bitte Internetverbindung prüfen.");
+                }
             }
-
-            document.getElementById("btStatus").innerText = "🎉 Fertig! Prost!";
-            alert(`🎉 Dein "${cocktailName}" wurde fertig gezapft! Prost!`);
         }
 
         async function loadMenu() {
