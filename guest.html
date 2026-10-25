@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>MyBar - Gäste Speisekarte & Zapfen</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background-color: #121212; color: #fff; margin: 0; padding: 15px; text-align: center; }
+        h1 { color: #ff9800; font-size: 22px; margin-bottom: 5px; }
+        p { color: #aaa; font-size: 13px; margin-top: 0; }
+        .card { background: #1e1e1e; border-radius: 12px; padding: 15px; margin-bottom: 15px; text-align: left; border: 1px solid #333; }
+        .card img { width: 60px; height: 60px; border-radius: 8px; object-fit: cover; }
+        .card-header { display: flex; gap: 12px; align-items: center; }
+        .card-title { flex: 1; }
+        .card-title h3 { margin: 0; font-size: 16px; color: #fff; }
+        .card-title p { margin: 4px 0 0 0; color: #aaa; font-size: 12px; }
+        .action-btn { width: 100%; padding: 12px; background: linear-gradient(135deg, #4caf50, #2e7d32); color: white; border: none; border-radius: 8px; font-weight: bold; font-size: 15px; margin-top: 10px; cursor: pointer; }
+        .status-box { background: #222; border-radius: 8px; padding: 10px; margin-bottom: 15px; font-size: 13px; color: #ff9800; border: 1px solid #444; }
+    </style>
+</head>
+<body>
+    <h1>🍹 MyBar Gäste-Speisekarte</h1>
+    <p id="barSubtitle">Lade Speisekarte...</p>
+
+    <div id="btStatus" class="status-box">
+        🔵 Bereit zum Zapfen
+    </div>
+
+    <div id="cocktailList">
+        <p style="color: #888;">Lade verfügbare Cocktails...</p>
+    </div>
+
+    <script>
+        const SERVICE_UUID = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
+        const RX_UUID = "6e400002-b5a3-f393-e0a9-e50e24dcca9e";
+
+        let bluetoothDevice = null;
+        let rxCharacteristic = null;
+        let partyBarId = window.location.hash.replace("#", "") || "MeineBar";
+
+        document.getElementById("barSubtitle").innerText = `Willkommen bei Bar: ${partyBarId}`;
+
+        async function connectWebBluetooth() {
+            if (rxCharacteristic) return true;
+
+            try {
+                document.getElementById("btStatus").innerText = "🟡 Suche Bluetooth-Maschine...";
+                bluetoothDevice = await navigator.bluetooth.requestDevice({
+                    filters: [{ services: [SERVICE_UUID] }]
+                });
+
+                document.getElementById("btStatus").innerText = "🟡 Verbinde mit Maschine...";
+                const server = await bluetoothDevice.gatt.connect();
+                const service = await server.getPrimaryService(SERVICE_UUID);
+                rxCharacteristic = await service.getCharacteristic(RX_UUID);
+
+                document.getElementById("btStatus").innerText = "🟢 Erfolgreich mit Maschine verbunden!";
+                return true;
+            } catch (e) {
+                console.error("Bluetooth Fehler:", e);
+                document.getElementById("btStatus").innerText = "❌ Bluetooth abgebrochen.";
+                alert("Bluetooth-Verbindung erforderlich: " + (e.message || "Nicht unterstützt"));
+                return false;
+            }
+        }
+
+        async function sendBleCommand(cmd) {
+            if (!rxCharacteristic) {
+                let connected = await connectWebBluetooth();
+                if (!connected) return false;
+            }
+            let encoder = new TextEncoder();
+            await rxCharacteristic.writeValue(encoder.encode(cmd));
+            return true;
+        }
+
+        async function pourCocktail(cocktailName, recipe) {
+            if (!confirm(`🍹 "${cocktailName}" jetzt zapfen?\n\nBitte vergewissere dich, dass dein Glas unter dem Auslauf steht!`)) {
+                return;
+            }
+
+            let connected = await connectWebBluetooth();
+            if (!connected) return;
+
+            document.getElementById("btStatus").innerText = `🍹 Zapfe ${cocktailName}...`;
+
+            for (let item of recipe) {
+                let pumpIdx = (item.pumpId || 1) - 1;
+                let durMs = (item.amountMl || 40) * 1000;
+
+                await sendBleCommand(`^${pumpIdx}-f`);
+                await new Promise(r => setTimeout(r, durMs));
+                await sendBleCommand(`^${pumpIdx}-s`);
+                await new Promise(r => setTimeout(r, 200));
+            }
+
+            document.getElementById("btStatus").innerText = "🎉 Fertig! Prost!";
+            alert(`🎉 Dein "${cocktailName}" wurde fertig gezapft! Prost!`);
+        }
+
+        async function loadMenu() {
+            try {
+                let res = await fetch(`https://ntfy.sh/mybar_menu_${partyBarId}/json?poll=1`);
+                let text = await res.text();
+                let lines = text.trim().split("\n");
+                if (lines.length > 0) {
+                    let last = JSON.parse(lines[lines.length - 1]);
+                    if (last && last.message) {
+                        let payload = JSON.parse(last.message);
+                        if (payload.cocktails) {
+                            renderMenu(payload.cocktails);
+                            return;
+                        }
+                    }
+                }
+            } catch(e) {}
+
+            renderMenu([
+                { name: "Screwdriver", recipe: [{pumpId:1, amountMl:50}, {pumpId:2, amountMl:150}], ingredients: ["Wodka", "Orangensaft"], thumb: "https://www.thecocktaildb.com/images/media/drink/8xnyke1504352207.jpg" },
+                { name: "Cuba Libre", recipe: [{pumpId:3, amountMl:50}, {pumpId:4, amountMl:150}], ingredients: ["Rum", "Limonade"], thumb: "https://www.thecocktaildb.com/images/media/drink/wmkbfj1606853905.jpg" }
+            ]);
+        }
+
+        function renderMenu(cocktails) {
+            const list = document.getElementById("cocktailList");
+            list.innerHTML = "";
+
+            if (cocktails.length === 0) {
+                list.innerHTML = '<p style="color:#aaa;">Aktuell keine Cocktails verfügbar.</p>';
+                return;
+            }
+
+            cocktails.forEach(c => {
+                let div = document.createElement("div");
+                div.className = "card";
+                let ingText = c.recipe ? c.recipe.map(r => `${r.type||'Zutat'} (${r.amountMl}ml)`).join(", ") : (c.ingredients||[]).join(", ");
+
+                div.innerHTML = `
+                    <div class="card-header">
+                        <img src="${c.thumb || ''}" onerror="this.src='data:image/svg+xml;utf8,<svg xmlns=\\'http://www.w3.org/2000/svg\\' width=\\'60\\' height=\\'60\\'><rect width=\\'60\\' height=\\'60\\' fill=\\'%23333\\'/><text x=\\'50%\\' y=\\'50%\\' dominant-baseline=\\'middle\\' text-anchor=\\'middle\\' font-size=\\'25\\'>🍹</text></svg>';">
+                        <div class="card-title">
+                            <h3>${c.name}</h3>
+                            <p>${ingText}</p>
+                        </div>
+                    </div>
+                    <button class="action-btn" onclick='pourCocktail(${JSON.stringify(c.name)}, ${JSON.stringify(c.recipe||[])})'>🍹 Cocktail jetzt zapfen!</button>
+                `;
+                list.appendChild(div);
+            });
+        }
+
+        loadMenu();
+    </script>
+</body>
+</html>
